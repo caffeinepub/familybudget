@@ -31,9 +31,10 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import type { SavingsGoal } from "../backend";
+import { BudgetCategory, type SavingsGoal } from "../backend";
 import {
   useAllSavingsGoals,
+  useCreateExpense,
   useCreateSavingsGoal,
   useDeleteSavingsGoal,
   useUpdateSavingsGoal,
@@ -58,6 +59,7 @@ export default function SavingsPage() {
   const createMutation = useCreateSavingsGoal();
   const updateMutation = useUpdateSavingsGoal();
   const deleteMutation = useDeleteSavingsGoal();
+  const createExpenseMutation = useCreateExpense();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
@@ -86,7 +88,7 @@ export default function SavingsPage() {
 
   const openUpdate = (item: SavingsGoal) => {
     setSelectedGoal(item);
-    setUpdateAmount(String(item.currentAmount));
+    setUpdateAmount("");
     setUpdateDialogOpen(true);
   };
 
@@ -104,6 +106,7 @@ export default function SavingsPage() {
     try {
       if (editItem) {
         const current = Number.parseFloat(form.currentAmount ?? "0") || 0;
+        const prevAmount = editItem.currentAmount;
         await updateMutation.mutateAsync({
           id: editItem.id,
           name: form.name,
@@ -111,7 +114,24 @@ export default function SavingsPage() {
           currentAmount: current,
           deadline: form.deadline,
         });
-        toast.success("Savings goal updated");
+        // Auto-create expense for the incremental amount saved
+        const delta = current - prevAmount;
+        if (delta > 0) {
+          const today = new Date().toISOString().slice(0, 10);
+          await createExpenseMutation.mutateAsync({
+            title: `Savings: ${form.name}`,
+            amount: delta,
+            category: BudgetCategory.others,
+            date: today,
+            notes: `Auto-added from savings goal: ${form.name}`,
+            shareAmount: null,
+          });
+          toast.success(
+            `Savings goal updated & ₹${delta.toFixed(2)} added to expenses`,
+          );
+        } else {
+          toast.success("Savings goal updated");
+        }
       } else {
         await createMutation.mutateAsync({
           name: form.name,
@@ -129,20 +149,33 @@ export default function SavingsPage() {
   const handleUpdateAmount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedGoal) return;
-    const current = Number.parseFloat(updateAmount);
-    if (Number.isNaN(current) || current < 0) {
-      toast.error("Invalid amount");
+    const addAmount = Number.parseFloat(updateAmount);
+    if (Number.isNaN(addAmount) || addAmount <= 0) {
+      toast.error("Please enter a valid amount to add");
       return;
     }
+    const newTotal = selectedGoal.currentAmount + addAmount;
     try {
       await updateMutation.mutateAsync({
         id: selectedGoal.id,
         name: selectedGoal.name,
         targetAmount: selectedGoal.targetAmount,
-        currentAmount: current,
+        currentAmount: newTotal,
         deadline: selectedGoal.deadline,
       });
-      toast.success("Progress updated!");
+      // Auto-create expense for the amount being saved
+      const today = new Date().toISOString().slice(0, 10);
+      await createExpenseMutation.mutateAsync({
+        title: `Savings: ${selectedGoal.name}`,
+        amount: addAmount,
+        category: BudgetCategory.others,
+        date: today,
+        notes: `Auto-added from savings goal: ${selectedGoal.name}`,
+        shareAmount: null,
+      });
+      toast.success(
+        `₹${addAmount.toFixed(2)} added to savings & recorded in expenses`,
+      );
       setUpdateDialogOpen(false);
     } catch {
       toast.error("Failed to update progress");
@@ -277,7 +310,7 @@ export default function SavingsPage() {
                       data-ocid={`savings.update_button.${idx + 1}`}
                     >
                       <PlusCircle className="h-3.5 w-3.5 mr-1" />
-                      Update Progress
+                      Add Savings Amount
                     </Button>
                   </div>
                 </CardContent>
@@ -337,6 +370,10 @@ export default function SavingsPage() {
                   }
                   data-ocid="savings.current.input"
                 />
+                <p className="text-xs text-muted-foreground">
+                  If you increase this amount, the difference will be
+                  automatically added to expenses.
+                </p>
               </div>
             )}
             <div className="space-y-2">
@@ -373,30 +410,46 @@ export default function SavingsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Update Progress Dialog */}
+      {/* Add Savings Amount Dialog */}
       <Dialog open={updateDialogOpen} onOpenChange={setUpdateDialogOpen}>
         <DialogContent data-ocid="savings.update.dialog">
           <DialogHeader>
             <DialogTitle className="font-display">
-              Update Progress — {selectedGoal?.name}
+              Add Savings — {selectedGoal?.name}
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleUpdateAmount} className="space-y-4">
             <div className="space-y-2">
-              <Label>Current Saved Amount (₹)</Label>
+              <Label>Amount to Add (₹)</Label>
               <Input
                 type="number"
-                min="0"
+                min="0.01"
                 step="0.01"
+                placeholder="Enter amount to save"
                 value={updateAmount}
                 onChange={(e) => setUpdateAmount(e.target.value)}
                 required
                 data-ocid="savings.update.input"
               />
               {selectedGoal && (
-                <p className="text-xs text-muted-foreground">
-                  Target: {formatCurrency(selectedGoal.targetAmount)}
-                </p>
+                <div className="rounded-md bg-muted p-3 space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Current saved</span>
+                    <span className="font-medium">
+                      {formatCurrency(selectedGoal.currentAmount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Target</span>
+                    <span className="font-medium">
+                      {formatCurrency(selectedGoal.targetAmount)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground pt-1">
+                    This amount will also be automatically recorded in your
+                    expenses.
+                  </p>
+                </div>
               )}
             </div>
             <DialogFooter>
@@ -410,13 +463,16 @@ export default function SavingsPage() {
               </Button>
               <Button
                 type="submit"
-                disabled={updateMutation.isPending}
+                disabled={
+                  updateMutation.isPending || createExpenseMutation.isPending
+                }
                 data-ocid="savings.update.submit_button"
               >
-                {updateMutation.isPending && (
+                {(updateMutation.isPending ||
+                  createExpenseMutation.isPending) && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
-                Update
+                Save & Add to Expenses
               </Button>
             </DialogFooter>
           </form>
