@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "BricolageGrotesque";
+  src: url("/assets/fonts/BricolageGrotesque.woff2") format("woff2");
+  font-weight: 200 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "PlusJakartaSans";
+  src: url("/assets/fonts/PlusJakartaSans.woff2") format("woff2");
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --background: 0.97 0.005 264;
+    --foreground: 0.15 0.025 264;
+    --card: 1 0 0;
+    --card-foreground: 0.15 0.025 264;
+    --popover: 1 0 0;
+    --popover-foreground: 0.15 0.025 264;
+    --primary: 0.28 0.09 264;
+    --primary-foreground: 0.98 0 0;
+    --secondary: 0.94 0.012 264;
+    --secondary-foreground: 0.25 0.06 264;
+    --muted: 0.94 0.012 264;
+    --muted-foreground: 0.52 0.025 264;
+    --accent: 0.62 0.17 165;
+    --accent-foreground: 0.98 0 0;
+    --destructive: 0.58 0.22 25;
+    --destructive-foreground: 0.98 0 0;
+    --border: 0.88 0.016 264;
+    --input: 0.88 0.016 264;
+    --ring: 0.28 0.09 264;
+    --radius: 0.5rem;
+    --chart-1: 0.62 0.17 165;
+    --chart-2: 0.55 0.18 264;
+    --chart-3: 0.72 0.17 60;
+    --chart-4: 0.58 0.22 25;
+    --chart-5: 0.6 0.18 310;
+    --sidebar: 0.18 0.045 264;
+    --sidebar-foreground: 0.88 0.012 264;
+    --sidebar-primary: 0.62 0.17 165;
+    --sidebar-primary-foreground: 0.98 0 0;
+    --sidebar-accent: 0.25 0.05 264;
+    --sidebar-accent-foreground: 0.88 0.012 264;
+    --sidebar-border: 0.26 0.05 264;
+    --sidebar-ring: 0.62 0.17 165;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "PlusJakartaSans", sans-serif;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: "BricolageGrotesque", sans-serif;
+  }
+}
