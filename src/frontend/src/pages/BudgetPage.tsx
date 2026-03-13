@@ -1,38 +1,13 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, Check, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { BudgetCategory, type BudgetLimit } from "../backend";
+import type { BudgetCategory } from "../backend";
 import {
   useAllExpenses,
   useBudgetLimitsByMonth,
@@ -42,11 +17,27 @@ import {
 } from "../hooks/useQueries";
 import {
   ALL_CATEGORIES,
+  CATEGORY_COLORS,
   formatCurrency,
   formatMonthDisplay,
   getCategoryLabel,
   getCurrentMonth,
 } from "../utils/categories";
+
+const CATEGORY_ICONS: Record<string, string> = {
+  food: "🍽️",
+  rent: "🏠",
+  electricityBill: "⚡",
+  waterCharges: "💧",
+  taxes: "🧾",
+  maintenance: "🔧",
+  education: "📚",
+  transport: "🚗",
+  medical: "🏥",
+  shopping: "🛍️",
+  entertainment: "🎬",
+  others: "📦",
+};
 
 export default function BudgetPage() {
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
@@ -57,15 +48,21 @@ export default function BudgetPage() {
   const updateMutation = useUpdateBudgetLimit();
   const deleteMutation = useDeleteBudgetLimit();
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editItem, setEditItem] = useState<BudgetLimit | null>(null);
-  const [formCategory, setFormCategory] = useState<BudgetCategory>(
-    BudgetCategory.food,
-  );
-  const [formLimit, setFormLimit] = useState("");
-  const [deleteId, setDeleteId] = useState<bigint | null>(null);
+  // local input state: category -> string value
+  const [inputs, setInputs] = useState<Record<string, string>>({});
+  const [savingCat, setSavingCat] = useState<string | null>(null);
 
-  // Calculate spent per category
+  // Sync inputs when budgetLimits loads
+  useEffect(() => {
+    if (!budgetLimits) return;
+    const next: Record<string, string> = {};
+    for (const bl of budgetLimits) {
+      next[bl.category as string] = String(bl.monthlyLimit);
+    }
+    setInputs(next);
+  }, [budgetLimits]);
+
+  // Calculate spent per category for current month
   const spentByCategory: Partial<Record<BudgetCategory, number>> = {};
   for (const exp of (allExpenses ?? []).filter((e) =>
     e.date.startsWith(selectedMonth),
@@ -74,67 +71,79 @@ export default function BudgetPage() {
       (spentByCategory[exp.category] ?? 0) + exp.amount;
   }
 
-  const openCreate = () => {
-    setEditItem(null);
-    setFormCategory(BudgetCategory.food);
-    setFormLimit("");
-    setDialogOpen(true);
-  };
-
-  const openEdit = (item: BudgetLimit) => {
-    setEditItem(item);
-    setFormCategory(item.category);
-    setFormLimit(String(item.monthlyLimit));
-    setDialogOpen(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const limit = Number.parseFloat(formLimit);
-    if (Number.isNaN(limit) || limit <= 0) {
-      toast.error("Invalid limit");
+  const handleSave = async (cat: BudgetCategory) => {
+    const val = inputs[cat as string] ?? "";
+    const limit = Number.parseFloat(val);
+    if (!val || Number.isNaN(limit) || limit <= 0) {
+      toast.error("Enter a valid amount");
       return;
     }
+    setSavingCat(cat as string);
     try {
-      if (editItem) {
+      const existing = (budgetLimits ?? []).find((bl) => bl.category === cat);
+      if (existing) {
         await updateMutation.mutateAsync({
-          id: editItem.id,
-          category: formCategory,
+          id: existing.id,
+          category: cat,
           monthlyLimit: limit,
           month: selectedMonth,
         });
-        toast.success("Budget limit updated");
       } else {
         await createMutation.mutateAsync({
-          category: formCategory,
+          category: cat,
           monthlyLimit: limit,
           month: selectedMonth,
         });
-        toast.success("Budget limit created");
       }
-      setDialogOpen(false);
+      toast.success(`${getCategoryLabel(cat)} budget saved`);
     } catch {
-      toast.error("Failed to save budget limit");
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteId) return;
-    try {
-      await deleteMutation.mutateAsync(deleteId);
-      toast.success("Budget limit deleted");
-    } catch {
-      toast.error("Failed to delete");
+      toast.error("Failed to save budget");
     } finally {
-      setDeleteId(null);
+      setSavingCat(null);
     }
   };
 
-  const isPending = createMutation.isPending || updateMutation.isPending;
+  const handleClear = async (cat: BudgetCategory) => {
+    const existing = (budgetLimits ?? []).find((bl) => bl.category === cat);
+    if (existing) {
+      setSavingCat(cat as string);
+      try {
+        await deleteMutation.mutateAsync(existing.id);
+        setInputs((prev) => {
+          const n = { ...prev };
+          delete n[cat as string];
+          return n;
+        });
+        toast.success(`${getCategoryLabel(cat)} budget cleared`);
+      } catch {
+        toast.error("Failed to clear budget");
+      } finally {
+        setSavingCat(null);
+      }
+    } else {
+      setInputs((prev) => {
+        const n = { ...prev };
+        delete n[cat as string];
+        return n;
+      });
+    }
+  };
+
   const isLoading = budgetLoading || expLoading;
 
+  // Summary totals
+  const totalBudget = (budgetLimits ?? []).reduce(
+    (s, b) => s + b.monthlyLimit,
+    0,
+  );
+  const totalSpent = Object.values(spentByCategory).reduce(
+    (s, v) => s + (v ?? 0),
+    0,
+  );
+
   return (
-    <div className="p-4 lg:p-6 space-y-4">
+    <div className="p-4 lg:p-6 space-y-5">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="font-display text-xl font-bold">Budget Planning</h2>
@@ -142,111 +151,187 @@ export default function BudgetPage() {
             {formatMonthDisplay(selectedMonth)}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="w-36 text-sm"
-            data-ocid="budget.month.input"
-          />
-          <Button onClick={openCreate} data-ocid="budget.add_button">
-            <Plus className="h-4 w-4 mr-1" /> Add Limit
-          </Button>
-        </div>
+        <Input
+          type="month"
+          value={selectedMonth}
+          onChange={(e) => {
+            setSelectedMonth(e.target.value);
+            setInputs({});
+          }}
+          className="w-36 text-sm"
+          data-ocid="budget.month.input"
+        />
       </div>
 
+      {/* Summary bar */}
+      {totalBudget > 0 && (
+        <Card className="shadow-card">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium">Overall Budget</span>
+              <span className="text-sm text-muted-foreground">
+                {formatCurrency(totalSpent)} / {formatCurrency(totalBudget)}
+              </span>
+            </div>
+            <Progress
+              value={Math.min((totalSpent / totalBudget) * 100, 100)}
+              className="h-2.5"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              {((totalSpent / totalBudget) * 100).toFixed(1)}% of total budget
+              used
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Category grid */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Card key={i}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {ALL_CATEGORIES.map((cat) => (
+            <Card key={cat}>
               <CardContent className="pt-4">
-                <Skeleton className="h-20 w-full" />
+                <Skeleton className="h-24 w-full" />
               </CardContent>
             </Card>
           ))}
         </div>
-      ) : (budgetLimits ?? []).length === 0 ? (
-        <div
-          className="text-center py-16 text-muted-foreground"
-          data-ocid="budget.empty_state"
-        >
-          <p className="font-medium">No budget limits set for this month</p>
-          <p className="text-sm mt-1">
-            Click "Add Limit" to set spending limits per category
-          </p>
-        </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {(budgetLimits ?? []).map((item, idx) => {
-            const spent = spentByCategory[item.category] ?? 0;
-            const remaining = item.monthlyLimit - spent;
-            const pct = Math.min((spent / item.monthlyLimit) * 100, 100);
-            const overBudget = spent > item.monthlyLimit;
+        <div
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+          data-ocid="budget.table"
+        >
+          {ALL_CATEGORIES.map((cat, idx) => {
+            const spent = spentByCategory[cat] ?? 0;
+            const limitVal = inputs[cat as string] ?? "";
+            const limitNum = Number.parseFloat(limitVal);
+            const hasLimit = !Number.isNaN(limitNum) && limitNum > 0;
+            const pct = hasLimit ? Math.min((spent / limitNum) * 100, 100) : 0;
+            const overBudget = hasLimit && spent > limitNum;
+            const color = CATEGORY_COLORS[cat];
+            const isSaving = savingCat === (cat as string);
+            const existing = (budgetLimits ?? []).find(
+              (bl) => bl.category === cat,
+            );
+
             return (
               <Card
-                key={String(item.id)}
-                className={`shadow-card ${overBudget ? "border-destructive" : ""}`}
+                key={cat}
+                className={`shadow-card transition-all ${
+                  overBudget ? "border-destructive" : ""
+                }`}
                 data-ocid={`budget.item.${idx + 1}`}
               >
-                <CardContent className="pt-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-sm">
-                          {getCategoryLabel(item.category)}
-                        </p>
-                        {overBudget && (
-                          <Badge
-                            variant="destructive"
-                            className="text-[10px] flex items-center gap-1"
-                          >
-                            <AlertTriangle className="h-2.5 w-2.5" /> Over
-                            Budget
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {formatCurrency(spent)} of{" "}
-                        {formatCurrency(item.monthlyLimit)}
-                      </p>
+                <CardHeader className="pb-2 pt-4 px-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">
+                        {CATEGORY_ICONS[cat as string] ?? "📦"}
+                      </span>
+                      <span className="font-semibold text-sm">
+                        {getCategoryLabel(cat)}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => openEdit(item)}
-                        data-ocid={`budget.edit_button.${idx + 1}`}
+                    {overBudget && (
+                      <Badge
+                        variant="destructive"
+                        className="text-[10px] flex items-center gap-1"
                       >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
+                        <AlertTriangle className="h-2.5 w-2.5" /> Over
+                      </Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 space-y-3">
+                  {/* Amount input */}
+                  <div>
+                    <label
+                      htmlFor={`budget-limit-${cat}`}
+                      className="text-xs text-muted-foreground mb-1 block"
+                    >
+                      Monthly Limit (₹)
+                    </label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Enter amount"
+                      value={limitVal}
+                      onChange={(e) =>
+                        setInputs((prev) => ({
+                          ...prev,
+                          [cat as string]: e.target.value,
+                        }))
+                      }
+                      id={`budget-limit-${cat}`}
+                      className="h-8 text-sm"
+                      data-ocid={`budget.limit.input.${idx + 1}`}
+                    />
+                  </div>
+
+                  {/* Progress */}
+                  {hasLimit && (
+                    <div>
+                      <Progress
+                        value={pct}
+                        className={`h-1.5 ${
+                          overBudget
+                            ? "[&>div]:bg-destructive"
+                            : "[&>div]:bg-accent"
+                        }`}
+                        style={
+                          {
+                            "--progress-color": color,
+                          } as React.CSSProperties
+                        }
+                      />
+                      <div className="flex justify-between mt-1">
+                        <span className="text-[11px] text-muted-foreground">
+                          Spent: {formatCurrency(spent)}
+                        </span>
+                        <span
+                          className={`text-[11px] font-medium ${
+                            overBudget
+                              ? "text-destructive"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {overBudget
+                            ? `${formatCurrency(Math.abs(limitNum - spent))} over`
+                            : `${formatCurrency(limitNum - spent)} left`}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      className="flex-1 h-7 text-xs"
+                      onClick={() => handleSave(cat)}
+                      disabled={isSaving}
+                      data-ocid={`budget.save_button.${idx + 1}`}
+                    >
+                      {isSaving ? (
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      ) : (
+                        <Check className="h-3 w-3 mr-1" />
+                      )}
+                      {existing ? "Update" : "Set"}
+                    </Button>
+                    {existing && (
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => setDeleteId(item.id)}
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs px-2 text-destructive hover:text-destructive"
+                        onClick={() => handleClear(cat)}
+                        disabled={isSaving}
                         data-ocid={`budget.delete_button.${idx + 1}`}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        Clear
                       </Button>
-                    </div>
-                  </div>
-                  <Progress
-                    value={pct}
-                    className={`h-2 ${overBudget ? "[&>div]:bg-destructive" : "[&>div]:bg-accent"}`}
-                  />
-                  <div className="flex justify-between mt-1.5">
-                    <span className="text-xs text-muted-foreground">
-                      {pct.toFixed(0)}% used
-                    </span>
-                    <span
-                      className={`text-xs font-medium ${overBudget ? "text-destructive" : "text-muted-foreground"}`}
-                    >
-                      {overBudget
-                        ? `${formatCurrency(Math.abs(remaining))} over`
-                        : `${formatCurrency(remaining)} left`}
-                    </span>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -254,90 +339,6 @@ export default function BudgetPage() {
           })}
         </div>
       )}
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent data-ocid="budget.dialog">
-          <DialogHeader>
-            <DialogTitle className="font-display">
-              {editItem ? "Edit Budget Limit" : "Set Budget Limit"}
-            </DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Category</Label>
-              <Select
-                value={formCategory}
-                onValueChange={(v) => setFormCategory(v as BudgetCategory)}
-                disabled={!!editItem}
-              >
-                <SelectTrigger data-ocid="budget.category.select">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ALL_CATEGORIES.map((cat) => (
-                    <SelectItem key={cat} value={cat}>
-                      {getCategoryLabel(cat)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Monthly Limit (₹)</Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={formLimit}
-                onChange={(e) => setFormLimit(e.target.value)}
-                required
-                data-ocid="budget.limit.input"
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setDialogOpen(false)}
-                data-ocid="budget.cancel_button"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isPending}
-                data-ocid="budget.submit_button"
-              >
-                {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {editItem ? "Update" : "Set Limit"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
-        <AlertDialogContent data-ocid="budget.delete.dialog">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove Budget Limit?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-ocid="budget.delete.cancel_button">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              data-ocid="budget.delete.confirm_button"
-            >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
